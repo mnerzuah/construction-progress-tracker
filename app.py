@@ -16,8 +16,6 @@ REQUIRED_COLUMNS = [
     "Finish"
 ]
 
-OPTIONAL_COLUMNS = ["Critical"]
-
 st.title("Construction Progress Tracker")
 st.write("Schedule-based construction progress tracking MVP")
 
@@ -37,7 +35,7 @@ if uploaded_file is not None:
 
         st.success("Schedule uploaded successfully")
 
-        st.subheader("Schedule Preview")
+        st.subheader("Original Schedule Preview")
         st.dataframe(schedule.head(20), use_container_width=True)
 
         missing_columns = [
@@ -79,10 +77,49 @@ if uploaded_file is not None:
             col1.metric("Total Activities", len(schedule))
             col2.metric("Disciplines", schedule["Discipline"].nunique())
             col3.metric("Packages", schedule["Package"].nunique())
-            col4.metric("Rooms / Locations", schedule["WBS location"].nunique())
+            col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
+
+            st.subheader("Filter Validated Schedule")
+
+            discipline_filter = st.multiselect(
+                "Filter by Discipline",
+                sorted(schedule["Discipline"].dropna().astype(str).unique())
+            )
+
+            package_filter = st.multiselect(
+                "Filter by Package",
+                sorted(schedule["Package"].dropna().astype(str).unique())
+            )
+
+            location_filter = st.multiselect(
+                "Filter by Location / WBS",
+                sorted(schedule["WBS location"].dropna().astype(str).unique())
+            )
+
+            filtered_schedule = schedule.copy()
+
+            if discipline_filter:
+                filtered_schedule = filtered_schedule[
+                    filtered_schedule["Discipline"].astype(str).isin(discipline_filter)
+                ]
+
+            if package_filter:
+                filtered_schedule = filtered_schedule[
+                    filtered_schedule["Package"].astype(str).isin(package_filter)
+                ]
+
+            if location_filter:
+                filtered_schedule = filtered_schedule[
+                    filtered_schedule["WBS location"].astype(str).isin(location_filter)
+                ]
+
+            st.write(f"Filtered Activities: {len(filtered_schedule)}")
 
             st.subheader("Validated Schedule")
-            st.dataframe(schedule, use_container_width=True)
+            st.dataframe(
+                filtered_schedule,
+                use_container_width=True
+            )
 
     except Exception as e:
         st.error("Could not read schedule file")
