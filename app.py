@@ -321,7 +321,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 21. APPLY FILTERS
+        # 21. APPLY VALIDATED SCHEDULE FILTERS
         # This section applies all selected filters.
         # ====================================================
 
