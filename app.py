@@ -1,13 +1,13 @@
 # ============================================================
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.8.2
+# Version 0.8.3
 #
 # Layout:
 # 1. Schedule Summary
 # 2. Progress Summary
-# 3. Activity Progress Table
-# 4. Filters
+# 3. Filters
+# 4. Activity Progress Table
 # 5. Activity Detail View
 # ============================================================
 
@@ -19,6 +19,10 @@ st.set_page_config(
     page_title="Construction Progress Tracker",
     layout="wide"
 )
+
+# ============================================================
+# 1. REQUIRED AND OPTIONAL SCHEDULE FIELDS
+# ============================================================
 
 REQUIRED_COLUMNS = [
     "Activity ID",
@@ -32,6 +36,10 @@ REQUIRED_COLUMNS = [
 
 OPTIONAL_COLUMNS = ["Critical"]
 
+# ============================================================
+# 2. COLUMN ALIASES FOR AUTO-DETECTION
+# ============================================================
+
 COLUMN_ALIASES = {
     "Activity ID": ["Activity ID", "ActivityID", "Activity Id", "Task ID", "ID", "Activity Code"],
     "WBS location": ["WBS location", "WBS Location", "WBS", "Location", "Area", "Zone", "Room", "Floor"],
@@ -43,9 +51,8 @@ COLUMN_ALIASES = {
     "Critical": ["Critical", "Critical Path", "Is Critical"]
 }
 
-
 # ============================================================
-# HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS
 # ============================================================
 
 def normalize_column_name(name):
@@ -167,6 +174,40 @@ def apply_filters(
     return filtered
 
 
+def get_dynamic_options(
+    df,
+    target_column,
+    selected_disciplines,
+    selected_packages,
+    selected_locations,
+    selected_critical_paths,
+    use_start_filter,
+    start_date_filter,
+    use_finish_filter,
+    finish_date_filter
+):
+    temp_df = df.copy()
+
+    temp_df = apply_filters(
+        temp_df,
+        selected_disciplines if target_column != "Discipline" else [],
+        selected_packages if target_column != "Package" else [],
+        selected_locations if target_column != "WBS location" else [],
+        selected_critical_paths if target_column != "Critical Path" else [],
+        use_start_filter,
+        start_date_filter,
+        use_finish_filter,
+        finish_date_filter
+    )
+
+    return sorted(
+        temp_df[target_column]
+        .dropna()
+        .astype(str)
+        .unique()
+    )
+
+
 def add_progress_placeholder_columns(df):
     progress_df = df.copy()
     today_date = date.today()
@@ -215,8 +256,60 @@ def build_activity_progress_table(progress_df):
     ].copy()
 
 
+def show_progress_summary(progress_summary):
+    if progress_summary.empty:
+        st.warning("No activities available for progress summary. Adjust the filters below.")
+        return
+
+    total_activities = len(progress_summary)
+    average_planned_progress = round(progress_summary["Planned Progress %"].mean(), 1)
+    average_actual_progress = round(progress_summary["Actual Progress %"].mean(), 1)
+
+    not_started_count = len(
+        progress_summary[progress_summary["Current Status"] == "Not Started"]
+    )
+
+    in_progress_count = len(
+        progress_summary[
+            progress_summary["Current Status"].str.contains("% Complete")
+        ]
+    )
+
+    pending_verification_count = len(
+        progress_summary[
+            progress_summary["Current Status"] == "100% Complete - Pending Verification"
+        ]
+    )
+
+    verified_count = len(
+        progress_summary[
+            progress_summary["Current Status"] == "100% Complete - Verified"
+        ]
+    )
+
+    constraints_count = len(
+        progress_summary[
+            progress_summary["Constraints"].astype(str).str.strip().str.lower() != "none"
+        ]
+    )
+
+    prog_col1, prog_col2, prog_col3, prog_col4 = st.columns(4)
+
+    prog_col1.metric("Total Activities", total_activities)
+    prog_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
+    prog_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
+    prog_col4.metric("Not Started", not_started_count)
+
+    prog_col5, prog_col6, prog_col7, prog_col8 = st.columns(4)
+
+    prog_col5.metric("In Progress", in_progress_count)
+    prog_col6.metric("100% Pending Verification", pending_verification_count)
+    prog_col7.metric("100% Verified", verified_count)
+    prog_col8.metric("Activities with Constraints", constraints_count)
+
+
 # ============================================================
-# APP TITLE AND UPLOAD SECTION
+# 4. APP TITLE AND UPLOAD SECTION
 # ============================================================
 
 st.title("Construction Progress Tracker")
@@ -251,9 +344,8 @@ uploaded_file = st.file_uploader(
     type=["xlsx", "xls", "csv"]
 )
 
-
 # ============================================================
-# MAIN APP LOGIC
+# 5. MAIN APP LOGIC
 # ============================================================
 
 if uploaded_file is not None:
@@ -415,114 +507,20 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # DEFAULT FILTER VALUES
-        # Filters appear after the first Activity Progress Table.
-        # ====================================================
-
-        min_start_date = schedule["Start Date"].min().date()
-        max_finish_date = schedule["Finish Date"].max().date()
-
-        discipline_filter = []
-        package_filter = []
-        location_filter = []
-        critical_path_filter = []
-        use_start_filter = False
-        use_finish_filter = False
-        start_date_filter = min_start_date
-        finish_date_filter = max_finish_date
-
-        filtered_schedule = apply_filters(
-            schedule,
-            discipline_filter,
-            package_filter,
-            location_filter,
-            critical_path_filter,
-            use_start_filter,
-            start_date_filter,
-            use_finish_filter,
-            finish_date_filter
-        )
-
-        progress_summary = add_progress_placeholder_columns(
-            filtered_schedule
-        )
-
-        activity_progress_table = build_activity_progress_table(
-            progress_summary
-        )
-
-        # ====================================================
-        # PROGRESS SUMMARY
-        # ====================================================
-
-        st.markdown("---")
-        st.subheader("Progress Summary")
-
-        total_activities = len(progress_summary)
-        average_planned_progress = round(progress_summary["Planned Progress %"].mean(), 1)
-        average_actual_progress = round(progress_summary["Actual Progress %"].mean(), 1)
-
-        not_started_count = len(
-            progress_summary[progress_summary["Current Status"] == "Not Started"]
-        )
-
-        in_progress_count = len(
-            progress_summary[
-                progress_summary["Current Status"].str.contains("% Complete")
-            ]
-        )
-
-        pending_verification_count = len(
-            progress_summary[
-                progress_summary["Current Status"] == "100% Complete - Pending Verification"
-            ]
-        )
-
-        verified_count = len(
-            progress_summary[
-                progress_summary["Current Status"] == "100% Complete - Verified"
-            ]
-        )
-
-        constraints_count = len(
-            progress_summary[
-                progress_summary["Constraints"].astype(str).str.strip().str.lower() != "none"
-            ]
-        )
-
-        prog_col1, prog_col2, prog_col3, prog_col4 = st.columns(4)
-
-        prog_col1.metric("Total Activities", total_activities)
-        prog_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
-        prog_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
-        prog_col4.metric("Not Started", not_started_count)
-
-        prog_col5, prog_col6, prog_col7, prog_col8 = st.columns(4)
-
-        prog_col5.metric("In Progress", in_progress_count)
-        prog_col6.metric("100% Pending Verification", pending_verification_count)
-        prog_col7.metric("100% Verified", verified_count)
-        prog_col8.metric("Activities with Constraints", constraints_count)
-
-        # ====================================================
-        # ACTIVITY PROGRESS TABLE
-        # First full table shown before filters.
-        # ====================================================
-
-        st.subheader("Activity Progress Table")
-
-        st.dataframe(
-            activity_progress_table,
-            use_container_width=True
-        )
-
-        # ====================================================
         # FILTERS
-        # Filters appear below the table and update the same table.
+        # Filters control both Progress Summary and Activity Table.
         # ====================================================
 
         st.markdown("---")
         st.subheader("Filters")
+
+        min_start_date = schedule["Start Date"].min().date()
+        max_finish_date = schedule["Finish Date"].max().date()
+
+        selected_disciplines = st.session_state.get("discipline_filter", [])
+        selected_packages = st.session_state.get("package_filter", [])
+        selected_locations = st.session_state.get("location_filter", [])
+        selected_critical_paths = st.session_state.get("critical_path_filter", [])
 
         date_col1, date_col2 = st.columns(2)
 
@@ -550,40 +548,108 @@ if uploaded_file is not None:
                 disabled=not use_finish_filter
             )
 
-        date_filtered_options = apply_filters(
+        discipline_options = get_dynamic_options(
             schedule,
-            [],
-            [],
-            [],
-            [],
+            "Discipline",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            selected_critical_paths,
             use_start_filter,
             start_date_filter,
             use_finish_filter,
             finish_date_filter
         )
 
+        package_options = get_dynamic_options(
+            schedule,
+            "Package",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            selected_critical_paths,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        location_options = get_dynamic_options(
+            schedule,
+            "WBS location",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            selected_critical_paths,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        critical_path_options = get_dynamic_options(
+            schedule,
+            "Critical Path",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            selected_critical_paths,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        selected_disciplines = [
+            item for item in selected_disciplines
+            if item in discipline_options
+        ]
+
+        selected_packages = [
+            item for item in selected_packages
+            if item in package_options
+        ]
+
+        selected_locations = [
+            item for item in selected_locations
+            if item in location_options
+        ]
+
+        selected_critical_paths = [
+            item for item in selected_critical_paths
+            if item in critical_path_options
+        ]
+
         filter_col1, filter_col2 = st.columns(2)
 
         with filter_col1:
             discipline_filter = st.multiselect(
                 "Filter by Discipline",
-                sorted(date_filtered_options["Discipline"].dropna().astype(str).unique())
+                discipline_options,
+                default=selected_disciplines,
+                key="discipline_filter"
             )
 
             location_filter = st.multiselect(
                 "Filter by Location / WBS",
-                sorted(date_filtered_options["WBS location"].dropna().astype(str).unique())
+                location_options,
+                default=selected_locations,
+                key="location_filter"
             )
 
         with filter_col2:
             package_filter = st.multiselect(
                 "Filter by Package",
-                sorted(date_filtered_options["Package"].dropna().astype(str).unique())
+                package_options,
+                default=selected_packages,
+                key="package_filter"
             )
 
             critical_path_filter = st.multiselect(
                 "Filter by Critical Path",
-                sorted(date_filtered_options["Critical Path"].dropna().astype(str).unique())
+                critical_path_options,
+                default=selected_critical_paths,
+                key="critical_path_filter"
             )
 
         filtered_schedule = apply_filters(
@@ -606,18 +672,27 @@ if uploaded_file is not None:
             filtered_progress_summary
         )
 
-        st.write(f"Filtered Activities: {len(filtered_activity_progress_table)}")
+        # ====================================================
+        # PROGRESS SUMMARY
+        # ====================================================
+
+        st.markdown("---")
+        st.subheader("Progress Summary")
+
+        show_progress_summary(filtered_progress_summary)
+
+        # ====================================================
+        # ACTIVITY PROGRESS TABLE
+        # ====================================================
 
         st.subheader("Activity Progress Table")
+
+        st.write(f"Filtered Activities: {len(filtered_activity_progress_table)}")
 
         st.dataframe(
             filtered_activity_progress_table,
             use_container_width=True
         )
-
-        # ====================================================
-        # DOWNLOAD FILTERED ACTIVITY PROGRESS TABLE
-        # ====================================================
 
         filtered_csv = filtered_activity_progress_table.to_csv(
             index=False
