@@ -1,7 +1,7 @@
 # ============================================================
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.5
+# Version 0.6
 # ============================================================
 
 import streamlit as st
@@ -26,9 +26,11 @@ REQUIRED_COLUMNS = [
     "Finish Date"
 ]
 
-OPTIONAL_COLUMNS = [
-    "Critical"
-]
+OPTIONAL_COLUMNS = ["Critical"]
+
+# ============================================================
+# 2. COLUMN ALIASES FOR AUTO-DETECTION
+# ============================================================
 
 COLUMN_ALIASES = {
     "Activity ID": ["Activity ID", "ActivityID", "Activity Id", "Task ID", "ID", "Activity Code"],
@@ -42,7 +44,7 @@ COLUMN_ALIASES = {
 }
 
 # ============================================================
-# 2. HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS
 # ============================================================
 
 def normalize_column_name(name):
@@ -65,7 +67,7 @@ def auto_detect_column(uploaded_columns, target_field):
 
 
 # ============================================================
-# 3. APP TITLE AND PROJECT INPUT
+# 4. APP TITLE AND PROJECT INPUT
 # ============================================================
 
 st.title("Construction Progress Tracker")
@@ -77,7 +79,7 @@ if project_name:
     st.success(f"Project Loaded: {project_name}")
 
 # ============================================================
-# 4. UPLOAD REQUIREMENTS NOTE
+# 5. UPLOAD REQUIREMENTS NOTE
 # ============================================================
 
 st.info(
@@ -100,7 +102,7 @@ st.info(
 )
 
 # ============================================================
-# 5. FILE UPLOAD
+# 6. FILE UPLOAD
 # ============================================================
 
 uploaded_file = st.file_uploader(
@@ -109,7 +111,7 @@ uploaded_file = st.file_uploader(
 )
 
 # ============================================================
-# 6. MAIN APP LOGIC
+# 7. MAIN APP LOGIC
 # ============================================================
 
 if uploaded_file is not None:
@@ -122,11 +124,8 @@ if uploaded_file is not None:
 
         st.success("Schedule uploaded successfully")
 
-        st.subheader("Original Schedule Preview")
-        st.dataframe(raw_schedule.head(20), use_container_width=True)
-
         # ====================================================
-        # 7. AUTO-DETECT COLUMNS
+        # 8. AUTO-DETECT COLUMNS
         # ====================================================
 
         uploaded_columns = list(raw_schedule.columns)
@@ -142,19 +141,36 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 8. SKIP MAPPER IF ALL REQUIRED FIELDS ARE DETECTED
+        # 9. IF AUTO-DETECTED, SKIP RAW PREVIEW AND MAPPER
         # ====================================================
 
         if all_required_detected:
-            st.success("Required fields were auto-detected successfully. Field mapping skipped.")
+            st.success(
+                "Required fields were auto-detected successfully. Preview and field mapping skipped."
+            )
 
             final_mapping = detected_mapping.copy()
 
+        # ====================================================
+        # 10. IF NOT AUTO-DETECTED, SHOW FULL PREVIEW AND MAPPER
+        # ====================================================
+
         else:
+            st.warning(
+                "Some required fields were not auto-detected. Review the full schedule preview and map the fields manually."
+            )
+
+            st.subheader("Original Schedule Preview")
+
+            st.dataframe(
+                raw_schedule,
+                use_container_width=True
+            )
+
             st.subheader("Map Schedule Fields")
 
-            st.warning(
-                "Some required fields were not auto-detected. Please map the schedule columns manually."
+            st.write(
+                "Select the schedule column that corresponds to each required app field."
             )
 
             column_choices_required = ["-- Select Column --"] + uploaded_columns
@@ -206,7 +222,7 @@ if uploaded_file is not None:
                 st.stop()
 
         # ====================================================
-        # 9. BUILD STANDARDIZED SCHEDULE
+        # 11. BUILD STANDARDIZED SCHEDULE
         # ====================================================
 
         schedule = pd.DataFrame()
@@ -221,7 +237,7 @@ if uploaded_file is not None:
                 schedule[field] = raw_schedule[final_mapping[field]]
 
         # ====================================================
-        # 10. DATE CLEANING
+        # 12. DATE CLEANING
         # ====================================================
 
         schedule["Start Date"] = pd.to_datetime(
@@ -235,7 +251,7 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 11. REMOVE INVALID ROWS
+        # 13. REMOVE INVALID ROWS
         # ====================================================
 
         schedule = schedule.dropna(
@@ -251,7 +267,7 @@ if uploaded_file is not None:
         st.success("Schedule validated successfully")
 
         # ====================================================
-        # 12. SCHEDULE SUMMARY
+        # 14. SCHEDULE SUMMARY
         # ====================================================
 
         st.subheader("Schedule Summary")
@@ -264,7 +280,7 @@ if uploaded_file is not None:
         col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
 
         # ====================================================
-        # 13. FILTER VALIDATED SCHEDULE
+        # 15. FILTER VALIDATED SCHEDULE
         # ====================================================
 
         st.subheader("Filter Validated Schedule")
@@ -325,7 +341,7 @@ if uploaded_file is not None:
         ]
 
         # ====================================================
-        # 14. DISPLAY VALIDATED SCHEDULE
+        # 16. DISPLAY VALIDATED SCHEDULE
         # ====================================================
 
         st.write(f"Filtered Activities: {len(filtered_schedule)}")
@@ -338,7 +354,7 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 15. DOWNLOAD FILTERED SCHEDULE
+        # 17. DOWNLOAD FILTERED SCHEDULE
         # ====================================================
 
         filtered_csv = filtered_schedule.to_csv(index=False).encode("utf-8")
