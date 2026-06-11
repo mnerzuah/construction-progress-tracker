@@ -1,7 +1,7 @@
 # ============================================================
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.6
+# Version 0.7
 # ============================================================
 
 import streamlit as st
@@ -64,6 +64,57 @@ def auto_detect_column(uploaded_columns, target_field):
             return normalized_uploaded[normalized_alias]
 
     return None
+
+
+def apply_date_filters(df, use_start_filter, start_date_filter, use_finish_filter, finish_date_filter):
+    filtered = df.copy()
+
+    if use_start_filter:
+        filtered = filtered[
+            filtered["Start Date"].dt.date >= start_date_filter
+        ]
+
+    if use_finish_filter:
+        filtered = filtered[
+            filtered["Finish Date"].dt.date <= finish_date_filter
+        ]
+
+    return filtered
+
+
+def get_dynamic_options(df, target_column, selected_disciplines, selected_packages, selected_locations,
+                        use_start_filter, start_date_filter, use_finish_filter, finish_date_filter):
+    temp_df = df.copy()
+
+    temp_df = apply_date_filters(
+        temp_df,
+        use_start_filter,
+        start_date_filter,
+        use_finish_filter,
+        finish_date_filter
+    )
+
+    if target_column != "Discipline" and selected_disciplines:
+        temp_df = temp_df[
+            temp_df["Discipline"].astype(str).isin(selected_disciplines)
+        ]
+
+    if target_column != "Package" and selected_packages:
+        temp_df = temp_df[
+            temp_df["Package"].astype(str).isin(selected_packages)
+        ]
+
+    if target_column != "WBS location" and selected_locations:
+        temp_df = temp_df[
+            temp_df["WBS location"].astype(str).isin(selected_locations)
+        ]
+
+    return sorted(
+        temp_df[target_column]
+        .dropna()
+        .astype(str)
+        .unique()
+    )
 
 
 # ============================================================
@@ -281,43 +332,159 @@ if uploaded_file is not None:
 
         # ====================================================
         # 15. FILTER VALIDATED SCHEDULE
+        # Dynamic filters update based on the other selected filters.
         # ====================================================
 
         st.subheader("Filter Validated Schedule")
 
-        discipline_filter = st.multiselect(
-            "Filter by Discipline",
-            sorted(schedule["Discipline"].dropna().astype(str).unique())
-        )
-
-        package_filter = st.multiselect(
-            "Filter by Package",
-            sorted(schedule["Package"].dropna().astype(str).unique())
-        )
-
-        location_filter = st.multiselect(
-            "Filter by Location / WBS",
-            sorted(schedule["WBS location"].dropna().astype(str).unique())
-        )
+        # ====================================================
+        # 15A. OPTIONAL DATE FILTER TOGGLES
+        # Dates can be ignored, start-only, finish-only, or both.
+        # ====================================================
 
         min_start_date = schedule["Start Date"].min().date()
+        max_start_date = schedule["Start Date"].max().date()
+        min_finish_date = schedule["Finish Date"].min().date()
         max_finish_date = schedule["Finish Date"].max().date()
+
+        date_toggle_col1, date_toggle_col2 = st.columns(2)
+
+        with date_toggle_col1:
+            use_start_filter = st.checkbox(
+                "Filter by Start Date",
+                value=False
+            )
+
+        with date_toggle_col2:
+            use_finish_filter = st.checkbox(
+                "Filter by Finish Date",
+                value=False
+            )
 
         date_col1, date_col2 = st.columns(2)
 
         with date_col1:
             start_date_filter = st.date_input(
                 "Start Date From",
-                value=min_start_date
+                value=min_start_date,
+                disabled=not use_start_filter
             )
 
         with date_col2:
             finish_date_filter = st.date_input(
                 "Finish Date To",
-                value=max_finish_date
+                value=max_finish_date,
+                disabled=not use_finish_filter
             )
 
+        # ====================================================
+        # 15B. READ CURRENT FILTER SELECTIONS FROM SESSION STATE
+        # This allows each dropdown to dynamically respond to the rest.
+        # ====================================================
+
+        selected_disciplines = st.session_state.get("discipline_filter", [])
+        selected_packages = st.session_state.get("package_filter", [])
+        selected_locations = st.session_state.get("location_filter", [])
+
+        # ====================================================
+        # 15C. BUILD DYNAMIC OPTIONS
+        # Each filter option list is based on the other active filters.
+        # ====================================================
+
+        discipline_options = get_dynamic_options(
+            schedule,
+            "Discipline",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        package_options = get_dynamic_options(
+            schedule,
+            "Package",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        location_options = get_dynamic_options(
+            schedule,
+            "WBS location",
+            selected_disciplines,
+            selected_packages,
+            selected_locations,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
+
+        # ====================================================
+        # 15D. CLEAN STALE SELECTIONS
+        # Removes selected values that are no longer valid.
+        # ====================================================
+
+        selected_disciplines = [
+            item for item in selected_disciplines
+            if item in discipline_options
+        ]
+
+        selected_packages = [
+            item for item in selected_packages
+            if item in package_options
+        ]
+
+        selected_locations = [
+            item for item in selected_locations
+            if item in location_options
+        ]
+
+        # ====================================================
+        # 15E. DYNAMIC FILTER WIDGETS
+        # ====================================================
+
+        discipline_filter = st.multiselect(
+            "Filter by Discipline",
+            discipline_options,
+            default=selected_disciplines,
+            key="discipline_filter"
+        )
+
+        package_filter = st.multiselect(
+            "Filter by Package",
+            package_options,
+            default=selected_packages,
+            key="package_filter"
+        )
+
+        location_filter = st.multiselect(
+            "Filter by Location / WBS",
+            location_options,
+            default=selected_locations,
+            key="location_filter"
+        )
+
+        # ====================================================
+        # 15F. APPLY FINAL FILTERS TO SCHEDULE
+        # ====================================================
+
         filtered_schedule = schedule.copy()
+
+        filtered_schedule = apply_date_filters(
+            filtered_schedule,
+            use_start_filter,
+            start_date_filter,
+            use_finish_filter,
+            finish_date_filter
+        )
 
         if discipline_filter:
             filtered_schedule = filtered_schedule[
@@ -333,12 +500,6 @@ if uploaded_file is not None:
             filtered_schedule = filtered_schedule[
                 filtered_schedule["WBS location"].astype(str).isin(location_filter)
             ]
-
-        filtered_schedule = filtered_schedule[
-            (filtered_schedule["Start Date"].dt.date >= start_date_filter)
-            &
-            (filtered_schedule["Finish Date"].dt.date <= finish_date_filter)
-        ]
 
         # ====================================================
         # 16. DISPLAY VALIDATED SCHEDULE
