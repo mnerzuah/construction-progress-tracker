@@ -2,6 +2,16 @@
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
 # Version 0.8
+#
+# Main changes in this version:
+# 1. Critical renamed to Critical Path
+# 2. Critical Path standardized to Yes / No
+# 3. Added Critical Path filter
+# 4. Removed Validated Schedule display table
+# 5. Added Progress Summary section
+# 6. Added Activity Progress Table
+# 7. Actual Progress is placeholder 0% until Version 0.9
+# 8. Verification Status is placeholder until Version 1.0
 # ============================================================
 
 import streamlit as st
@@ -78,6 +88,7 @@ def normalize_critical_path(value):
         "y",
         "true",
         "1",
+        "1.0",
         "critical",
         "critical path",
         "x"
@@ -128,24 +139,16 @@ def get_dynamic_options(
     )
 
     if target_column != "Discipline" and selected_disciplines:
-        temp_df = temp_df[
-            temp_df["Discipline"].astype(str).isin(selected_disciplines)
-        ]
+        temp_df = temp_df[temp_df["Discipline"].astype(str).isin(selected_disciplines)]
 
     if target_column != "Package" and selected_packages:
-        temp_df = temp_df[
-            temp_df["Package"].astype(str).isin(selected_packages)
-        ]
+        temp_df = temp_df[temp_df["Package"].astype(str).isin(selected_packages)]
 
     if target_column != "WBS location" and selected_locations:
-        temp_df = temp_df[
-            temp_df["WBS location"].astype(str).isin(selected_locations)
-        ]
+        temp_df = temp_df[temp_df["WBS location"].astype(str).isin(selected_locations)]
 
     if target_column != "Critical Path" and selected_critical_paths:
-        temp_df = temp_df[
-            temp_df["Critical Path"].astype(str).isin(selected_critical_paths)
-        ]
+        temp_df = temp_df[temp_df["Critical Path"].astype(str).isin(selected_critical_paths)]
 
     return sorted(
         temp_df[target_column]
@@ -171,7 +174,6 @@ def calculate_planned_progress(start_date, finish_date, today_date):
         return 100.0
 
     elapsed_duration = (today_date - start_date).days
-
     planned_progress = (elapsed_duration / total_duration) * 100
 
     return round(planned_progress, 1)
@@ -265,19 +267,15 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 9. IF AUTO-DETECTED, SKIP RAW PREVIEW AND MAPPER
+        # 9. AUTO-DETECTION OR MANUAL MAPPING
         # ====================================================
 
         if all_required_detected:
             st.success(
-                "Required fields were auto-detected successfully. Preview and field mapping skipped."
+                "Required fields were auto-detected successfully. Schedule is valid."
             )
 
             final_mapping = detected_mapping.copy()
-
-        # ====================================================
-        # 10. IF NOT AUTO-DETECTED, SHOW FULL PREVIEW AND MAPPER
-        # ====================================================
 
         else:
             st.warning(
@@ -345,8 +343,10 @@ if uploaded_file is not None:
 
                 st.stop()
 
+            st.success("Schedule fields mapped successfully.")
+
         # ====================================================
-        # 11. BUILD STANDARDIZED SCHEDULE
+        # 10. BUILD STANDARDIZED SCHEDULE
         # ====================================================
 
         schedule = pd.DataFrame()
@@ -361,7 +361,7 @@ if uploaded_file is not None:
                 schedule[field] = raw_schedule[final_mapping[field]]
 
         # ====================================================
-        # 12. DATE CLEANING
+        # 11. DATE CLEANING
         # ====================================================
 
         schedule["Start Date"] = pd.to_datetime(
@@ -375,8 +375,8 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 13. CRITICAL PATH CLEANING
-        # ============================================================
+        # 12. CRITICAL PATH CLEANING
+        # ====================================================
 
         schedule["Critical Path"] = schedule["Critical"].apply(
             normalize_critical_path
@@ -387,8 +387,8 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 14. REMOVE INVALID ROWS
-        # ============================================================
+        # 13. REMOVE INVALID ROWS
+        # ====================================================
 
         schedule = schedule.dropna(
             subset=REQUIRED_COLUMNS
@@ -403,25 +403,25 @@ if uploaded_file is not None:
         st.success("Schedule validated successfully")
 
         # ====================================================
-        # 15. SCHEDULE SUMMARY
-        # ============================================================
+        # 14. SCHEDULE SUMMARY
+        # ====================================================
 
         st.subheader("Schedule Summary")
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        summary_col1, summary_col2, summary_col3, summary_col4, summary_col5 = st.columns(5)
 
-        col1.metric("Total Activities", len(schedule))
-        col2.metric("Disciplines", schedule["Discipline"].nunique())
-        col3.metric("Packages", schedule["Package"].nunique())
-        col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
-        col5.metric(
+        summary_col1.metric("Total Activities", len(schedule))
+        summary_col2.metric("Disciplines", schedule["Discipline"].nunique())
+        summary_col3.metric("Packages", schedule["Package"].nunique())
+        summary_col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
+        summary_col5.metric(
             "Critical Path Activities",
             len(schedule[schedule["Critical Path"] == "Yes"])
         )
 
         # ====================================================
-        # 16. FILTER VALIDATED SCHEDULE
-        # ============================================================
+        # 15. FILTER VALIDATED SCHEDULE
+        # ====================================================
 
         st.subheader("Filter Validated Schedule")
 
@@ -597,18 +597,11 @@ if uploaded_file is not None:
                 filtered_schedule["Critical Path"].astype(str).isin(critical_path_filter)
             ]
 
-        # ====================================================
-        # 17. VALIDATED SCHEDULE TABLE
-        # ============================================================
-
         st.write(f"Filtered Activities: {len(filtered_schedule)}")
 
-        st.subheader("Validated Schedule")
-
-        st.dataframe(
-            filtered_schedule,
-            use_container_width=True
-        )
+        # ====================================================
+        # 16. DOWNLOAD FILTERED SCHEDULE
+        # ====================================================
 
         filtered_csv = filtered_schedule.to_csv(index=False).encode("utf-8")
 
@@ -620,10 +613,10 @@ if uploaded_file is not None:
         )
 
         # ====================================================
-        # 18. PROGRESS SUMMARY
+        # 17. PROGRESS SUMMARY
         # Version 0.8 uses placeholder actual progress.
         # Version 0.9 will replace placeholders with saved entries.
-        # ============================================================
+        # ====================================================
 
         st.markdown("---")
         st.subheader("Progress Summary")
@@ -666,9 +659,9 @@ if uploaded_file is not None:
 
             in_progress_count = len(
                 progress_summary[
-                    progress_summary["Current Status"].str.contains("Complete") == False
+                    progress_summary["Current Status"].str.contains("% Complete")
                 ]
-            ) - not_started_count
+            )
 
             pending_verification_count = len(
                 progress_summary[
@@ -682,18 +675,22 @@ if uploaded_file is not None:
                 ]
             )
 
-            summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+            progress_col1, progress_col2, progress_col3, progress_col4 = st.columns(4)
 
-            summary_col1.metric("Total Activities", total_activities)
-            summary_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
-            summary_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
-            summary_col4.metric("Not Started", not_started_count)
+            progress_col1.metric("Total Activities", total_activities)
+            progress_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
+            progress_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
+            progress_col4.metric("Not Started", not_started_count)
 
-            summary_col5, summary_col6, summary_col7 = st.columns(3)
+            progress_col5, progress_col6, progress_col7 = st.columns(3)
 
-            summary_col5.metric("In Progress", in_progress_count)
-            summary_col6.metric("100% Pending Verification", pending_verification_count)
-            summary_col7.metric("100% Verified", verified_count)
+            progress_col5.metric("In Progress", in_progress_count)
+            progress_col6.metric("100% Pending Verification", pending_verification_count)
+            progress_col7.metric("100% Verified", verified_count)
+
+            # ====================================================
+            # 18. ACTIVITY PROGRESS TABLE
+            # ====================================================
 
             activity_progress_table = progress_summary[
                 [
@@ -720,8 +717,8 @@ if uploaded_file is not None:
             )
 
             # ====================================================
-            # 19. OPTIONAL ACTIVITY DRILLDOWN
-            # ============================================================
+            # 19. OPTIONAL ACTIVITY DETAIL VIEW
+            # ====================================================
 
             st.subheader("Activity Detail View")
 
