@@ -1,11 +1,18 @@
 # ============================================================
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.7
+# Version 0.8
+#
+# New in Version 0.8:
+# 1. Activity selection workflow
+# 2. Selected activity details card
+# 3. Planned progress calculation
+# 4. Basic activity status preview
 # ============================================================
 
 import streamlit as st
 import pandas as pd
+from datetime import date
 
 st.set_page_config(
     page_title="Construction Progress Tracker",
@@ -82,8 +89,17 @@ def apply_date_filters(df, use_start_filter, start_date_filter, use_finish_filte
     return filtered
 
 
-def get_dynamic_options(df, target_column, selected_disciplines, selected_packages, selected_locations,
-                        use_start_filter, start_date_filter, use_finish_filter, finish_date_filter):
+def get_dynamic_options(
+    df,
+    target_column,
+    selected_disciplines,
+    selected_packages,
+    selected_locations,
+    use_start_filter,
+    start_date_filter,
+    use_finish_filter,
+    finish_date_filter
+):
     temp_df = df.copy()
 
     temp_df = apply_date_filters(
@@ -115,6 +131,38 @@ def get_dynamic_options(df, target_column, selected_disciplines, selected_packag
         .astype(str)
         .unique()
     )
+
+
+def calculate_planned_progress(start_date, finish_date, today_date):
+    start_date = start_date.date()
+    finish_date = finish_date.date()
+
+    if today_date < start_date:
+        return 0
+
+    if today_date > finish_date:
+        return 100
+
+    total_duration = (finish_date - start_date).days
+
+    if total_duration <= 0:
+        return 100
+
+    elapsed_duration = (today_date - start_date).days
+
+    planned_progress = (elapsed_duration / total_duration) * 100
+
+    return round(planned_progress, 1)
+
+
+def get_activity_status_preview(planned_progress):
+    if planned_progress == 0:
+        return "Not Started"
+
+    if planned_progress < 100:
+        return "In Progress"
+
+    return "Should Be Complete"
 
 
 # ============================================================
@@ -332,19 +380,11 @@ if uploaded_file is not None:
 
         # ====================================================
         # 15. FILTER VALIDATED SCHEDULE
-        # Dynamic filters update based on the other selected filters.
         # ====================================================
 
         st.subheader("Filter Validated Schedule")
 
-        # ====================================================
-        # 15A. OPTIONAL DATE FILTER TOGGLES
-        # Dates can be ignored, start-only, finish-only, or both.
-        # ====================================================
-
         min_start_date = schedule["Start Date"].min().date()
-        max_start_date = schedule["Start Date"].max().date()
-        min_finish_date = schedule["Finish Date"].min().date()
         max_finish_date = schedule["Finish Date"].max().date()
 
         date_toggle_col1, date_toggle_col2 = st.columns(2)
@@ -377,19 +417,9 @@ if uploaded_file is not None:
                 disabled=not use_finish_filter
             )
 
-        # ====================================================
-        # 15B. READ CURRENT FILTER SELECTIONS FROM SESSION STATE
-        # This allows each dropdown to dynamically respond to the rest.
-        # ====================================================
-
         selected_disciplines = st.session_state.get("discipline_filter", [])
         selected_packages = st.session_state.get("package_filter", [])
         selected_locations = st.session_state.get("location_filter", [])
-
-        # ====================================================
-        # 15C. BUILD DYNAMIC OPTIONS
-        # Each filter option list is based on the other active filters.
-        # ====================================================
 
         discipline_options = get_dynamic_options(
             schedule,
@@ -427,11 +457,6 @@ if uploaded_file is not None:
             finish_date_filter
         )
 
-        # ====================================================
-        # 15D. CLEAN STALE SELECTIONS
-        # Removes selected values that are no longer valid.
-        # ====================================================
-
         selected_disciplines = [
             item for item in selected_disciplines
             if item in discipline_options
@@ -446,10 +471,6 @@ if uploaded_file is not None:
             item for item in selected_locations
             if item in location_options
         ]
-
-        # ====================================================
-        # 15E. DYNAMIC FILTER WIDGETS
-        # ====================================================
 
         discipline_filter = st.multiselect(
             "Filter by Discipline",
@@ -471,10 +492,6 @@ if uploaded_file is not None:
             default=selected_locations,
             key="location_filter"
         )
-
-        # ====================================================
-        # 15F. APPLY FINAL FILTERS TO SCHEDULE
-        # ====================================================
 
         filtered_schedule = schedule.copy()
 
@@ -526,6 +543,121 @@ if uploaded_file is not None:
             file_name="filtered_validated_schedule.csv",
             mime="text/csv"
         )
+
+        # ====================================================
+        # 18. VERSION 0.8 - ACTIVITY SELECTION WORKFLOW
+        # User selects one activity from the filtered schedule.
+        # ====================================================
+
+        st.markdown("---")
+        st.subheader("Activity Selection")
+
+        if filtered_schedule.empty:
+            st.warning("No activities available for selection. Adjust the filters above.")
+
+        else:
+            activity_selection_table = filtered_schedule.copy()
+
+            activity_selection_table["Activity Selector"] = (
+                activity_selection_table["Activity ID"].astype(str)
+                + " | "
+                + activity_selection_table["Activity Name"].astype(str)
+                + " | "
+                + activity_selection_table["WBS location"].astype(str)
+            )
+
+            selected_activity_label = st.selectbox(
+                "Select Activity",
+                activity_selection_table["Activity Selector"].tolist()
+            )
+
+            selected_activity = activity_selection_table[
+                activity_selection_table["Activity Selector"] == selected_activity_label
+            ].iloc[0]
+
+            # =================================================
+            # 19. SELECTED ACTIVITY DETAILS CARD
+            # Shows context before progress is entered.
+            # =================================================
+
+            st.subheader("Selected Activity Details")
+
+            detail_col1, detail_col2, detail_col3 = st.columns(3)
+
+            with detail_col1:
+                st.write("**Activity ID:**")
+                st.write(selected_activity["Activity ID"])
+
+                st.write("**Activity Name:**")
+                st.write(selected_activity["Activity Name"])
+
+                st.write("**Critical:**")
+                st.write(selected_activity["Critical"])
+
+            with detail_col2:
+                st.write("**Discipline:**")
+                st.write(selected_activity["Discipline"])
+
+                st.write("**Package:**")
+                st.write(selected_activity["Package"])
+
+                st.write("**Location / WBS:**")
+                st.write(selected_activity["WBS location"])
+
+            with detail_col3:
+                st.write("**Start Date:**")
+                st.write(selected_activity["Start Date"].date())
+
+                st.write("**Finish Date:**")
+                st.write(selected_activity["Finish Date"].date())
+
+                duration_days = (
+                    selected_activity["Finish Date"].date()
+                    - selected_activity["Start Date"].date()
+                ).days
+
+                st.write("**Duration:**")
+                st.write(f"{duration_days} days")
+
+            # =================================================
+            # 20. PLANNED PROGRESS PREVIEW
+            # Uses today's date against schedule start/finish.
+            # =================================================
+
+            today_date = date.today()
+
+            planned_progress = calculate_planned_progress(
+                selected_activity["Start Date"],
+                selected_activity["Finish Date"],
+                today_date
+            )
+
+            status_preview = get_activity_status_preview(
+                planned_progress
+            )
+
+            st.subheader("Planned Progress Preview")
+
+            progress_col1, progress_col2, progress_col3 = st.columns(3)
+
+            progress_col1.metric(
+                "Today",
+                today_date.strftime("%Y-%m-%d")
+            )
+
+            progress_col2.metric(
+                "Planned Progress",
+                f"{planned_progress}%"
+            )
+
+            progress_col3.metric(
+                "Schedule Status Preview",
+                status_preview
+            )
+
+            st.progress(
+                int(planned_progress)
+            )
 
     except Exception as e:
         st.error("Could not read schedule file")
