@@ -1,14 +1,24 @@
 # ============================================================
 # Developed by Michael N. Erzuah
 # CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.8.1
+# Version 0.8.2
+#
+# Layout:
+# 1. Schedule Summary
+# 2. Progress Summary
+# 3. Activity Progress Table
+# 4. Filters
+# 5. Activity Detail View
 # ============================================================
 
 import streamlit as st
 import pandas as pd
 from datetime import date
 
-st.set_page_config(page_title="Construction Progress Tracker", layout="wide")
+st.set_page_config(
+    page_title="Construction Progress Tracker",
+    layout="wide"
+)
 
 REQUIRED_COLUMNS = [
     "Activity ID",
@@ -34,18 +44,25 @@ COLUMN_ALIASES = {
 }
 
 
+# ============================================================
+# HELPER FUNCTIONS
+# ============================================================
+
 def normalize_column_name(name):
     return str(name).strip().lower().replace("_", " ")
 
 
 def auto_detect_column(uploaded_columns, target_field):
     normalized_uploaded = {
-        normalize_column_name(col): col for col in uploaded_columns
+        normalize_column_name(col): col
+        for col in uploaded_columns
     }
 
     for alias in COLUMN_ALIASES.get(target_field, []):
-        if normalize_column_name(alias) in normalized_uploaded:
-            return normalized_uploaded[normalize_column_name(alias)]
+        normalized_alias = normalize_column_name(alias)
+
+        if normalized_alias in normalized_uploaded:
+            return normalized_uploaded[normalized_alias]
 
     return None
 
@@ -57,8 +74,14 @@ def normalize_critical_path(value):
     value = str(value).strip().lower()
 
     true_values = [
-        "yes", "y", "true", "1", "1.0",
-        "critical", "critical path", "x"
+        "yes",
+        "y",
+        "true",
+        "1",
+        "1.0",
+        "critical",
+        "critical path",
+        "x"
     ]
 
     return "Yes" if value in true_values else "No"
@@ -80,7 +103,9 @@ def calculate_planned_progress(start_date, finish_date, today_date):
         return 100.0
 
     elapsed_duration = (today_date - start_date).days
-    return round((elapsed_duration / total_duration) * 100, 1)
+    planned_progress = (elapsed_duration / total_duration) * 100
+
+    return round(planned_progress, 1)
 
 
 def get_current_status(actual_progress, verification_status):
@@ -142,6 +167,58 @@ def apply_filters(
     return filtered
 
 
+def add_progress_placeholder_columns(df):
+    progress_df = df.copy()
+    today_date = date.today()
+
+    progress_df["Planned Progress %"] = progress_df.apply(
+        lambda row: calculate_planned_progress(
+            row["Start Date"],
+            row["Finish Date"],
+            today_date
+        ),
+        axis=1
+    )
+
+    progress_df["Actual Progress %"] = 0
+    progress_df["Verification Status"] = "Not Verified"
+    progress_df["Constraints"] = "None"
+
+    progress_df["Current Status"] = progress_df.apply(
+        lambda row: get_current_status(
+            row["Actual Progress %"],
+            row["Verification Status"]
+        ),
+        axis=1
+    )
+
+    return progress_df
+
+
+def build_activity_progress_table(progress_df):
+    return progress_df[
+        [
+            "Activity ID",
+            "Activity Name",
+            "WBS location",
+            "Discipline",
+            "Package",
+            "Start Date",
+            "Finish Date",
+            "Critical Path",
+            "Planned Progress %",
+            "Actual Progress %",
+            "Verification Status",
+            "Current Status",
+            "Constraints"
+        ]
+    ].copy()
+
+
+# ============================================================
+# APP TITLE AND UPLOAD SECTION
+# ============================================================
+
 st.title("Construction Progress Tracker")
 st.write("Schedule-based construction progress tracking MVP")
 
@@ -174,9 +251,18 @@ uploaded_file = st.file_uploader(
     type=["xlsx", "xls", "csv"]
 )
 
+
+# ============================================================
+# MAIN APP LOGIC
+# ============================================================
+
 if uploaded_file is not None:
 
     try:
+        # ====================================================
+        # READ SCHEDULE FILE
+        # ====================================================
+
         if uploaded_file.name.lower().endswith(".csv"):
             raw_schedule = pd.read_csv(uploaded_file)
         else:
@@ -185,6 +271,10 @@ if uploaded_file is not None:
         st.success("Schedule uploaded successfully")
 
         uploaded_columns = list(raw_schedule.columns)
+
+        # ====================================================
+        # AUTO-DETECT OR MANUAL MAP COLUMNS
+        # ====================================================
 
         detected_mapping = {
             field: auto_detect_column(uploaded_columns, field)
@@ -217,6 +307,7 @@ if uploaded_file is not None:
 
             for field in REQUIRED_COLUMNS:
                 detected_col = detected_mapping.get(field)
+
                 default_index = (
                     column_choices_required.index(detected_col)
                     if detected_col in uploaded_columns
@@ -232,6 +323,7 @@ if uploaded_file is not None:
 
             for field in OPTIONAL_COLUMNS:
                 detected_col = detected_mapping.get(field)
+
                 default_index = (
                     column_choices_optional.index(detected_col)
                     if detected_col in uploaded_columns
@@ -252,11 +344,17 @@ if uploaded_file is not None:
 
             if missing_mapped_fields:
                 st.warning("Map all required fields before the schedule can be validated.")
+
                 for field in missing_mapped_fields:
                     st.write(f"- {field}")
+
                 st.stop()
 
             st.success("Schedule fields mapped successfully.")
+
+        # ====================================================
+        # BUILD STANDARDIZED SCHEDULE
+        # ====================================================
 
         schedule = pd.DataFrame()
 
@@ -269,13 +367,27 @@ if uploaded_file is not None:
             else:
                 schedule[field] = raw_schedule[final_mapping[field]]
 
-        schedule["Start Date"] = pd.to_datetime(schedule["Start Date"], errors="coerce")
-        schedule["Finish Date"] = pd.to_datetime(schedule["Finish Date"], errors="coerce")
+        schedule["Start Date"] = pd.to_datetime(
+            schedule["Start Date"],
+            errors="coerce"
+        )
 
-        schedule["Critical Path"] = schedule["Critical"].apply(normalize_critical_path)
-        schedule = schedule.drop(columns=["Critical"])
+        schedule["Finish Date"] = pd.to_datetime(
+            schedule["Finish Date"],
+            errors="coerce"
+        )
 
-        schedule = schedule.dropna(subset=REQUIRED_COLUMNS)
+        schedule["Critical Path"] = schedule["Critical"].apply(
+            normalize_critical_path
+        )
+
+        schedule = schedule.drop(
+            columns=["Critical"]
+        )
+
+        schedule = schedule.dropna(
+            subset=REQUIRED_COLUMNS
+        )
 
         if schedule.empty:
             st.error(
@@ -285,23 +397,30 @@ if uploaded_file is not None:
 
         st.success("Schedule validated successfully")
 
+        # ====================================================
+        # SCHEDULE SUMMARY
+        # ====================================================
+
         st.subheader("Schedule Summary")
 
-        summary_col1, summary_col2, summary_col3, summary_col4, summary_col5 = st.columns(5)
+        sched_col1, sched_col2, sched_col3, sched_col4, sched_col5 = st.columns(5)
 
-        summary_col1.metric("Total Activities", len(schedule))
-        summary_col2.metric("Disciplines", schedule["Discipline"].nunique())
-        summary_col3.metric("Packages", schedule["Package"].nunique())
-        summary_col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
-        summary_col5.metric(
+        sched_col1.metric("Total Activities", len(schedule))
+        sched_col2.metric("Disciplines", schedule["Discipline"].nunique())
+        sched_col3.metric("Packages", schedule["Package"].nunique())
+        sched_col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
+        sched_col5.metric(
             "Critical Path Activities",
             len(schedule[schedule["Critical Path"] == "Yes"])
         )
 
         # ====================================================
-        # DEFAULT FILTER STATE
-        # Filters now appear below the Activity Progress Table.
+        # DEFAULT FILTER VALUES
+        # Filters appear after the first Activity Progress Table.
         # ====================================================
+
+        min_start_date = schedule["Start Date"].min().date()
+        max_finish_date = schedule["Finish Date"].max().date()
 
         discipline_filter = []
         package_filter = []
@@ -309,10 +428,6 @@ if uploaded_file is not None:
         critical_path_filter = []
         use_start_filter = False
         use_finish_filter = False
-
-        min_start_date = schedule["Start Date"].min().date()
-        max_finish_date = schedule["Finish Date"].max().date()
-
         start_date_filter = min_start_date
         finish_date_filter = max_finish_date
 
@@ -328,36 +443,20 @@ if uploaded_file is not None:
             finish_date_filter
         )
 
+        progress_summary = add_progress_placeholder_columns(
+            filtered_schedule
+        )
+
+        activity_progress_table = build_activity_progress_table(
+            progress_summary
+        )
+
         # ====================================================
         # PROGRESS SUMMARY
         # ====================================================
 
         st.markdown("---")
         st.subheader("Progress Summary")
-
-        progress_summary = filtered_schedule.copy()
-        today_date = date.today()
-
-        progress_summary["Planned Progress %"] = progress_summary.apply(
-            lambda row: calculate_planned_progress(
-                row["Start Date"],
-                row["Finish Date"],
-                today_date
-            ),
-            axis=1
-        )
-
-        progress_summary["Actual Progress %"] = 0
-        progress_summary["Verification Status"] = "Not Verified"
-        progress_summary["Constraints"] = "None"
-
-        progress_summary["Current Status"] = progress_summary.apply(
-            lambda row: get_current_status(
-                row["Actual Progress %"],
-                row["Verification Status"]
-            ),
-            axis=1
-        )
 
         total_activities = len(progress_summary)
         average_planned_progress = round(progress_summary["Planned Progress %"].mean(), 1)
@@ -391,59 +490,48 @@ if uploaded_file is not None:
             ]
         )
 
-        progress_col1, progress_col2, progress_col3, progress_col4 = st.columns(4)
+        prog_col1, prog_col2, prog_col3, prog_col4 = st.columns(4)
 
-        progress_col1.metric("Total Activities", total_activities)
-        progress_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
-        progress_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
-        progress_col4.metric("Not Started", not_started_count)
+        prog_col1.metric("Total Activities", total_activities)
+        prog_col2.metric("Average Planned Progress", f"{average_planned_progress}%")
+        prog_col3.metric("Average Actual Progress", f"{average_actual_progress}%")
+        prog_col4.metric("Not Started", not_started_count)
 
-        progress_col5, progress_col6, progress_col7, progress_col8 = st.columns(4)
+        prog_col5, prog_col6, prog_col7, prog_col8 = st.columns(4)
 
-        progress_col5.metric("In Progress", in_progress_count)
-        progress_col6.metric("100% Pending Verification", pending_verification_count)
-        progress_col7.metric("100% Verified", verified_count)
-        progress_col8.metric("Activities with Constraints", constraints_count)
-
-        activity_progress_table = progress_summary[
-            [
-                "Activity ID",
-                "Activity Name",
-                "WBS location",
-                "Discipline",
-                "Package",
-                "Start Date",
-                "Finish Date",
-                "Critical Path",
-                "Planned Progress %",
-                "Actual Progress %",
-                "Verification Status",
-                "Current Status",
-                "Constraints"
-            ]
-        ].copy()
-
-        st.subheader("Activity Progress Table")
-        st.dataframe(activity_progress_table, use_container_width=True)
+        prog_col5.metric("In Progress", in_progress_count)
+        prog_col6.metric("100% Pending Verification", pending_verification_count)
+        prog_col7.metric("100% Verified", verified_count)
+        prog_col8.metric("Activities with Constraints", constraints_count)
 
         # ====================================================
-        # FILTERS MOVED BELOW ACTIVITY PROGRESS TABLE
+        # ACTIVITY PROGRESS TABLE
+        # First full table shown before filters.
+        # ====================================================
+
+        st.subheader("Activity Progress Table")
+
+        st.dataframe(
+            activity_progress_table,
+            use_container_width=True
+        )
+
+        # ====================================================
+        # FILTERS
+        # Filters appear below the table and update the same table.
         # ====================================================
 
         st.markdown("---")
-        st.subheader("Filter Activity Progress Table")
-
-        date_toggle_col1, date_toggle_col2 = st.columns(2)
-
-        with date_toggle_col1:
-            use_start_filter = st.checkbox("Filter by Start Date", value=False)
-
-        with date_toggle_col2:
-            use_finish_filter = st.checkbox("Filter by Finish Date", value=False)
+        st.subheader("Filters")
 
         date_col1, date_col2 = st.columns(2)
 
         with date_col1:
+            use_start_filter = st.checkbox(
+                "Filter by Start Date",
+                value=False
+            )
+
             start_date_filter = st.date_input(
                 "Start Date From",
                 value=min_start_date,
@@ -451,13 +539,18 @@ if uploaded_file is not None:
             )
 
         with date_col2:
+            use_finish_filter = st.checkbox(
+                "Filter by Finish Date",
+                value=False
+            )
+
             finish_date_filter = st.date_input(
                 "Finish Date To",
                 value=max_finish_date,
                 disabled=not use_finish_filter
             )
 
-        filtered_for_options = apply_filters(
+        date_filtered_options = apply_filters(
             schedule,
             [],
             [],
@@ -469,25 +562,29 @@ if uploaded_file is not None:
             finish_date_filter
         )
 
-        discipline_filter = st.multiselect(
-            "Filter by Discipline",
-            sorted(filtered_for_options["Discipline"].dropna().astype(str).unique())
-        )
+        filter_col1, filter_col2 = st.columns(2)
 
-        package_filter = st.multiselect(
-            "Filter by Package",
-            sorted(filtered_for_options["Package"].dropna().astype(str).unique())
-        )
+        with filter_col1:
+            discipline_filter = st.multiselect(
+                "Filter by Discipline",
+                sorted(date_filtered_options["Discipline"].dropna().astype(str).unique())
+            )
 
-        location_filter = st.multiselect(
-            "Filter by Location / WBS",
-            sorted(filtered_for_options["WBS location"].dropna().astype(str).unique())
-        )
+            location_filter = st.multiselect(
+                "Filter by Location / WBS",
+                sorted(date_filtered_options["WBS location"].dropna().astype(str).unique())
+            )
 
-        critical_path_filter = st.multiselect(
-            "Filter by Critical Path",
-            sorted(filtered_for_options["Critical Path"].dropna().astype(str).unique())
-        )
+        with filter_col2:
+            package_filter = st.multiselect(
+                "Filter by Package",
+                sorted(date_filtered_options["Package"].dropna().astype(str).unique())
+            )
+
+            critical_path_filter = st.multiselect(
+                "Filter by Critical Path",
+                sorted(date_filtered_options["Critical Path"].dropna().astype(str).unique())
+            )
 
         filtered_schedule = apply_filters(
             schedule,
@@ -501,62 +598,35 @@ if uploaded_file is not None:
             finish_date_filter
         )
 
-        st.write(f"Filtered Activities: {len(filtered_schedule)}")
-
-        # ====================================================
-        # RECALCULATED FILTERED PROGRESS TABLE
-        # ====================================================
-
-        filtered_progress_summary = filtered_schedule.copy()
-
-        filtered_progress_summary["Planned Progress %"] = filtered_progress_summary.apply(
-            lambda row: calculate_planned_progress(
-                row["Start Date"],
-                row["Finish Date"],
-                today_date
-            ),
-            axis=1
+        filtered_progress_summary = add_progress_placeholder_columns(
+            filtered_schedule
         )
 
-        filtered_progress_summary["Actual Progress %"] = 0
-        filtered_progress_summary["Verification Status"] = "Not Verified"
-        filtered_progress_summary["Constraints"] = "None"
-
-        filtered_progress_summary["Current Status"] = filtered_progress_summary.apply(
-            lambda row: get_current_status(
-                row["Actual Progress %"],
-                row["Verification Status"]
-            ),
-            axis=1
+        filtered_activity_progress_table = build_activity_progress_table(
+            filtered_progress_summary
         )
 
-        filtered_activity_progress_table = filtered_progress_summary[
-            [
-                "Activity ID",
-                "Activity Name",
-                "WBS location",
-                "Discipline",
-                "Package",
-                "Start Date",
-                "Finish Date",
-                "Critical Path",
-                "Planned Progress %",
-                "Actual Progress %",
-                "Verification Status",
-                "Current Status",
-                "Constraints"
-            ]
-        ].copy()
+        st.write(f"Filtered Activities: {len(filtered_activity_progress_table)}")
 
-        st.subheader("Filtered Activity Progress Table")
-        st.dataframe(filtered_activity_progress_table, use_container_width=True)
+        st.subheader("Activity Progress Table")
 
-        filtered_csv = filtered_activity_progress_table.to_csv(index=False).encode("utf-8")
+        st.dataframe(
+            filtered_activity_progress_table,
+            use_container_width=True
+        )
+
+        # ====================================================
+        # DOWNLOAD FILTERED ACTIVITY PROGRESS TABLE
+        # ====================================================
+
+        filtered_csv = filtered_activity_progress_table.to_csv(
+            index=False
+        ).encode("utf-8")
 
         st.download_button(
-            label="Download Filtered Activity Progress Table",
+            label="Download Activity Progress Table",
             data=filtered_csv,
-            file_name="filtered_activity_progress_table.csv",
+            file_name="activity_progress_table.csv",
             mime="text/csv"
         )
 
