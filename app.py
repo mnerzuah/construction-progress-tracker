@@ -1,21 +1,18 @@
 # ============================================================
 # Developed by Michael N. Erzuah
-#CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
-# Version 0.3
+# CONSTRUCTION PROGRESS TRACKER - STREAMLIT MVP
+# Version 0.4
 #
 # Current features:
 # 1. Project name input
 # 2. Schedule upload
-# 3. Required field validation
-# 4. Optional Critical column handling
-# 5. Schedule cleaning
-# 6. Schedule summary metrics
-# 7. Validated schedule filtering
-#    - Discipline
-#    - Package
-#    - Location / WBS
-#    - Start date
-#    - Finish date
+# 3. Mandatory field notice
+# 4. Auto-detect schedule fields
+# 5. Manual field mapping if auto-detection fails
+# 6. Optional Critical column handling
+# 7. Schedule cleaning
+# 8. Schedule summary metrics
+# 9. Validated schedule filtering
 # ============================================================
 
 
@@ -39,7 +36,7 @@ st.set_page_config(
 
 # ============================================================
 # 3. REQUIRED AND OPTIONAL SCHEDULE FIELDS
-# Update this section if your schedule template changes.
+# Update this section if your required schedule template changes.
 # ============================================================
 
 REQUIRED_COLUMNS = [
@@ -58,7 +55,75 @@ OPTIONAL_COLUMNS = [
 
 
 # ============================================================
-# 4. APP TITLE AND INTRO
+# 4. COLUMN NAME ALIASES FOR AUTO-DETECTION
+# Add more possible schedule column names here over time.
+# ============================================================
+
+COLUMN_ALIASES = {
+    "Activity ID": [
+        "Activity ID", "ActivityID", "Activity Id", "Task ID", "TaskID",
+        "ID", "Activity Code", "Act ID"
+    ],
+    "WBS location": [
+        "WBS location", "WBS Location", "WBS", "Location", "Area",
+        "Zone", "Room", "Floor", "Work Area"
+    ],
+    "Activity Name": [
+        "Activity Name", "Task Name", "Name", "Activity", "Description",
+        "Activity Description", "Task Description"
+    ],
+    "Discipline": [
+        "Discipline", "Trade", "Scope", "Workstream"
+    ],
+    "Package": [
+        "Package", "Work Package", "Bid Package", "Trade Package",
+        "Subcontract Package"
+    ],
+    "Start": [
+        "Start", "Start Date", "Planned Start", "Baseline Start",
+        "Early Start"
+    ],
+    "Finish": [
+        "Finish", "Finish Date", "End Date", "Planned Finish",
+        "Baseline Finish", "Early Finish"
+    ],
+    "Critical": [
+        "Critical", "Critical Path", "Is Critical"
+    ]
+}
+
+
+# ============================================================
+# 5. HELPER FUNCTION - NORMALIZE COLUMN NAMES
+# Makes matching less sensitive to spaces and capitalization.
+# ============================================================
+
+def normalize_column_name(name):
+    return str(name).strip().lower().replace("_", " ")
+
+
+# ============================================================
+# 6. HELPER FUNCTION - AUTO-DETECT COLUMN
+# Tries to match required app fields to uploaded schedule headings.
+# ============================================================
+
+def auto_detect_column(uploaded_columns, target_field):
+    normalized_uploaded = {
+        normalize_column_name(col): col
+        for col in uploaded_columns
+    }
+
+    for alias in COLUMN_ALIASES.get(target_field, []):
+        normalized_alias = normalize_column_name(alias)
+
+        if normalized_alias in normalized_uploaded:
+            return normalized_uploaded[normalized_alias]
+
+    return None
+
+
+# ============================================================
+# 7. APP TITLE AND INTRO
 # ============================================================
 
 st.title("Construction Progress Tracker")
@@ -69,7 +134,7 @@ st.write(
 
 
 # ============================================================
-# 5. PROJECT NAME INPUT
+# 8. PROJECT NAME INPUT
 # Later this will become project creation / project selection.
 # ============================================================
 
@@ -84,7 +149,32 @@ if project_name:
 
 
 # ============================================================
-# 6. SCHEDULE FILE UPLOAD
+# 9. SCHEDULE UPLOAD REQUIREMENTS NOTE
+# This tells users what their schedule must contain.
+# ============================================================
+
+st.info(
+    """
+    **Schedule upload requirement:** Your schedule must contain the following mandatory fields,
+    either with the exact names or with columns that can be mapped manually:
+
+    - Activity ID
+    - WBS location / Location / Area
+    - Activity Name
+    - Discipline / Trade
+    - Package / Work Package
+    - Start
+    - Finish
+
+    Optional field:
+
+    - Critical
+    """
+)
+
+
+# ============================================================
+# 10. SCHEDULE FILE UPLOAD
 # User uploads Excel or CSV schedule export.
 # ============================================================
 
@@ -95,7 +185,7 @@ uploaded_file = st.file_uploader(
 
 
 # ============================================================
-# 7. READ UPLOADED SCHEDULE
+# 11. READ UPLOADED SCHEDULE
 # This block reads the uploaded file into a Pandas DataFrame.
 # ============================================================
 
@@ -103,72 +193,130 @@ if uploaded_file is not None:
 
     try:
         if uploaded_file.name.lower().endswith(".csv"):
-            schedule = pd.read_csv(uploaded_file)
+            raw_schedule = pd.read_csv(uploaded_file)
         else:
-            schedule = pd.read_excel(uploaded_file)
+            raw_schedule = pd.read_excel(uploaded_file)
 
         st.success("Schedule uploaded successfully")
 
 
         # ====================================================
-        # 8. ORIGINAL SCHEDULE PREVIEW
+        # 12. ORIGINAL SCHEDULE PREVIEW
         # Shows the raw uploaded schedule before validation.
         # ====================================================
 
         st.subheader("Original Schedule Preview")
 
         st.dataframe(
-            schedule.head(20),
+            raw_schedule.head(20),
             use_container_width=True
         )
 
 
         # ====================================================
-        # 9. REQUIRED FIELD VALIDATION
-        # The app stops if any required field is missing.
+        # 13. AUTO-DETECT SCHEDULE COLUMNS
+        # Attempts to find matching columns automatically.
         # ====================================================
 
-        missing_columns = [
-            col for col in REQUIRED_COLUMNS
-            if col not in schedule.columns
+        uploaded_columns = list(raw_schedule.columns)
+
+        detected_mapping = {}
+
+        for field in REQUIRED_COLUMNS + OPTIONAL_COLUMNS:
+            detected_mapping[field] = auto_detect_column(
+                uploaded_columns,
+                field
+            )
+
+
+        # ====================================================
+        # 14. MANUAL FIELD MAPPING
+        # Users confirm or manually map fields.
+        # ====================================================
+
+        st.subheader("Map Schedule Fields")
+
+        st.write(
+            "Confirm the detected columns below. If a field was not detected, select the correct schedule column manually."
+        )
+
+        column_choices_required = ["-- Select Column --"] + uploaded_columns
+        column_choices_optional = ["-- Not Provided --"] + uploaded_columns
+
+        final_mapping = {}
+
+        for field in REQUIRED_COLUMNS:
+            detected_col = detected_mapping.get(field)
+
+            if detected_col in uploaded_columns:
+                default_index = column_choices_required.index(detected_col)
+            else:
+                default_index = 0
+
+            final_mapping[field] = st.selectbox(
+                f"{field} *",
+                column_choices_required,
+                index=default_index,
+                key=f"map_{field}"
+            )
+
+        for field in OPTIONAL_COLUMNS:
+            detected_col = detected_mapping.get(field)
+
+            if detected_col in uploaded_columns:
+                default_index = column_choices_optional.index(detected_col)
+            else:
+                default_index = 0
+
+            final_mapping[field] = st.selectbox(
+                f"{field} (optional)",
+                column_choices_optional,
+                index=default_index,
+                key=f"map_{field}"
+            )
+
+
+        # ====================================================
+        # 15. VALIDATE MANUAL MAPPING
+        # Required fields must all be mapped before proceeding.
+        # ====================================================
+
+        missing_mapped_fields = [
+            field for field in REQUIRED_COLUMNS
+            if final_mapping[field] == "-- Select Column --"
         ]
 
-        if missing_columns:
-            st.error("Schedule is missing required fields:")
+        if missing_mapped_fields:
+            st.warning(
+                "Map all required fields before the schedule can be validated."
+            )
 
-            for col in missing_columns:
-                st.write(f"- {col}")
+            for field in missing_mapped_fields:
+                st.write(f"- {field}")
 
             st.stop()
 
-        else:
-            st.success("All required fields are present")
+
+        # ====================================================
+        # 16. BUILD STANDARDIZED SCHEDULE
+        # Converts user-selected columns into app-required names.
+        # ====================================================
+
+        schedule = pd.DataFrame()
+
+        for field in REQUIRED_COLUMNS:
+            schedule[field] = raw_schedule[final_mapping[field]]
+
+        for field in OPTIONAL_COLUMNS:
+            if final_mapping[field] == "-- Not Provided --":
+                schedule[field] = ""
+            else:
+                schedule[field] = raw_schedule[final_mapping[field]]
 
 
         # ====================================================
-        # 10. OPTIONAL FIELD HANDLING
-        # Critical is optional. If missing, create blank column.
-        # ====================================================
-
-        for col in OPTIONAL_COLUMNS:
-            if col not in schedule.columns:
-                schedule[col] = ""
-
-
-        # ====================================================
-        # 11. KEEP ONLY MVP COLUMNS
-        # This simplifies the working schedule table.
-        # ====================================================
-
-        schedule = schedule[
-            REQUIRED_COLUMNS + OPTIONAL_COLUMNS
-        ].copy()
-
-
-        # ====================================================
-        # 12. DATE CLEANING
+        # 17. DATE CLEANING
         # Converts Start and Finish fields into true dates.
-        # Invalid dates become blank and are removed later.
         # ====================================================
 
         schedule["Start"] = pd.to_datetime(
@@ -183,7 +331,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 13. REMOVE INVALID ROWS
+        # 18. REMOVE INVALID ROWS
         # Rows missing required information are removed.
         # ====================================================
 
@@ -193,19 +341,27 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 14. EMPTY SCHEDULE CHECK
+        # 19. EMPTY SCHEDULE CHECK
         # Prevents app from continuing if everything was removed.
         # ====================================================
 
         if schedule.empty:
             st.error(
-                "No valid activities found after cleaning the schedule."
+                "No valid activities found after cleaning the schedule. Check your field mapping and date columns."
             )
             st.stop()
 
 
         # ====================================================
-        # 15. SCHEDULE SUMMARY METRICS
+        # 20. VALIDATION SUCCESS MESSAGE
+        # Confirms the schedule is ready for filtering.
+        # ====================================================
+
+        st.success("Schedule validated successfully")
+
+
+        # ====================================================
+        # 21. SCHEDULE SUMMARY METRICS
         # High-level counts from the validated schedule.
         # ====================================================
 
@@ -213,29 +369,14 @@ if uploaded_file is not None:
 
         col1, col2, col3, col4 = st.columns(4)
 
-        col1.metric(
-            "Total Activities",
-            len(schedule)
-        )
-
-        col2.metric(
-            "Disciplines",
-            schedule["Discipline"].nunique()
-        )
-
-        col3.metric(
-            "Packages",
-            schedule["Package"].nunique()
-        )
-
-        col4.metric(
-            "Locations / WBS Groups",
-            schedule["WBS location"].nunique()
-        )
+        col1.metric("Total Activities", len(schedule))
+        col2.metric("Disciplines", schedule["Discipline"].nunique())
+        col3.metric("Packages", schedule["Package"].nunique())
+        col4.metric("Locations / WBS Groups", schedule["WBS location"].nunique())
 
 
         # ====================================================
-        # 16. FILTER SECTION HEADER
+        # 22. FILTER SECTION HEADER
         # Users can narrow the validated schedule.
         # ====================================================
 
@@ -243,15 +384,12 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 17. DISCIPLINE FILTER
+        # 23. DISCIPLINE FILTER
         # Allows one or more disciplines to be selected.
         # ====================================================
 
         discipline_options = sorted(
-            schedule["Discipline"]
-            .dropna()
-            .astype(str)
-            .unique()
+            schedule["Discipline"].dropna().astype(str).unique()
         )
 
         discipline_filter = st.multiselect(
@@ -261,15 +399,12 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 18. PACKAGE FILTER
+        # 24. PACKAGE FILTER
         # Allows one or more packages to be selected.
         # ====================================================
 
         package_options = sorted(
-            schedule["Package"]
-            .dropna()
-            .astype(str)
-            .unique()
+            schedule["Package"].dropna().astype(str).unique()
         )
 
         package_filter = st.multiselect(
@@ -279,16 +414,12 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 19. LOCATION / WBS FILTER
+        # 25. LOCATION / WBS FILTER
         # This is not always a room.
-        # It may be a zone, floor, area, system, or WBS group.
         # ====================================================
 
         location_options = sorted(
-            schedule["WBS location"]
-            .dropna()
-            .astype(str)
-            .unique()
+            schedule["WBS location"].dropna().astype(str).unique()
         )
 
         location_filter = st.multiselect(
@@ -298,7 +429,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 20. DATE FILTERS
+        # 26. DATE FILTERS
         # User controls schedule window by Start and Finish dates.
         # ====================================================
 
@@ -321,7 +452,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 21. APPLY VALIDATED SCHEDULE FILTERS
+        # 27. APPLY VALIDATED SCHEDULE FILTERS
         # This section applies all selected filters.
         # ====================================================
 
@@ -360,7 +491,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 22. FILTERED RESULTS SUMMARY
+        # 28. FILTERED RESULTS SUMMARY
         # Shows how many activities remain after filtering.
         # ====================================================
 
@@ -370,7 +501,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 23. FILTERED VALIDATED SCHEDULE TABLE
+        # 29. FILTERED VALIDATED SCHEDULE TABLE
         # Main table shown to user.
         # ====================================================
 
@@ -383,7 +514,7 @@ if uploaded_file is not None:
 
 
         # ====================================================
-        # 24. DOWNLOAD FILTERED SCHEDULE
+        # 30. DOWNLOAD FILTERED SCHEDULE
         # Allows user to export the filtered results.
         # ====================================================
 
@@ -400,7 +531,7 @@ if uploaded_file is not None:
 
 
     # ========================================================
-    # 25. ERROR HANDLING
+    # 31. ERROR HANDLING
     # Shows readable error if upload or processing fails.
     # ========================================================
 
@@ -410,7 +541,7 @@ if uploaded_file is not None:
 
 
 # ============================================================
-# 26. EMPTY STATE
+# 32. EMPTY STATE
 # Message shown before user uploads a schedule.
 # ============================================================
 
